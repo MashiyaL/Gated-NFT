@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { BrowserProvider } from "ethers";
 
 const SERVER = "http://localhost:3001";
@@ -10,8 +10,25 @@ export default function Home() {
   const [wallet, setWallet] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
+  const [showPopup, setShowPopup] = useState(false);
 
   const shortAddr = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+  // Listen for wallet disconnect / account changes
+  useEffect(() => {
+    if (!window.ethereum) return;
+
+    const handleAccountsChanged = (accounts: string[]) => {
+      if (accounts.length === 0) {
+        window.location.href = "/exit";
+      }
+    };
+
+    window.ethereum.on("accountsChanged", handleAccountsChanged);
+    return () => {
+      window.ethereum?.removeListener("accountsChanged", handleAccountsChanged);
+    };
+  }, []);
 
   async function connectWallet() {
     if (!window.ethereum) {
@@ -32,21 +49,18 @@ export default function Home() {
   }
 
   async function checkAccess() {
-    if (!wallet) return;
+    if (!wallet || !window.ethereum) return;
     setStatus("checking");
     setMessage("");
     try {
       const provider = new BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
 
-      // 1. Get message from server
       const msgRes = await fetch(`${SERVER}/api/message`);
       const { message: msg } = await msgRes.json();
 
-      // 2. Sign with ethers signer
       const signature = await signer.signMessage(msg);
 
-      // 3. Verify on server
       const verRes = await fetch(`${SERVER}/api/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,6 +71,7 @@ export default function Home() {
       if (data.access) {
         setStatus("granted");
         setMessage(`Access granted for ${shortAddr(data.address)}`);
+        setShowPopup(true);
       } else {
         setStatus("denied");
         setMessage(data.reason || "No NFT found.");
@@ -110,6 +125,29 @@ export default function Home() {
           )}
         </div>
       </div>
+
+      {/* Access Granted Popup */}
+      {showPopup && (
+        <div style={styles.overlay}>
+          <div style={styles.popup}>
+            <div style={styles.popupIcon}>🎉</div>
+            <h2 style={styles.popupTitle}>You&apos;re in!</h2>
+            <p style={styles.popupSub}>Your NFT ownership has been verified.</p>
+            <button
+              style={{ ...styles.btn, ...styles.btnAccent, marginTop: 8 }}
+              onClick={() => (window.location.href = "/dashboard")}
+            >
+              Click here to go to the next page →
+            </button>
+            <button
+              style={{ ...styles.btn, marginTop: 8, fontSize: 12, color: "#555" }}
+              onClick={() => setShowPopup(false)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -215,5 +253,39 @@ const styles: Record<string, React.CSSProperties> = {
     background: "linear-gradient(135deg,#6c4fff,#a855f7)",
     border: "none",
     color: "#fff",
+  },
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.75)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 999,
+  },
+  popup: {
+    background: "#16161a",
+    border: "1px solid #2a2a35",
+    borderRadius: 16,
+    padding: "40px 36px",
+    width: 360,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 12,
+    boxShadow: "0 0 80px rgba(108,79,255,0.25)",
+    textAlign: "center",
+  },
+  popupIcon: { fontSize: 48 },
+  popupTitle: {
+    color: "#f0eeff",
+    fontSize: 22,
+    fontWeight: 700,
+    margin: 0,
+  },
+  popupSub: {
+    color: "#6b6b80",
+    fontSize: 13,
+    margin: 0,
   },
 };
